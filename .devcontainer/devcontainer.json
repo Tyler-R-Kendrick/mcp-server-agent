@@ -1,0 +1,17 @@
+{
+	"image": "mcr.microsoft.com/devcontainers/universal:2",
+	"features": {
+		"ghcr.io/devcontainers-extra/features/poetry:2": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"GitHub.copilot",
+				"ms-python.python",
+				"ms-python.isort",
+				"ms-toolsai.jupyter-renderers",
+				"ms-dotnettools.dotnet-interactive-vscode"
+			]
+		}
+	}
+}

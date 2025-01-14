@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "poetry-demo"
+version = "0.1.0"
+description = ""
+authors = ["Tyler Kendrick <contact.tylerkendrick@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+api = { path = "./src/api", develop = true }
+app = { path = "./src/app", develop = true }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.2"
+
+[tool.poetry.group.test.dependencies]
+pytest-mock = "^3.14.0"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "--import-mode=importlib",
+]
+testpaths = [
+    "tests",
+]
+pythonpath = [
+    ".",
+    "src",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
