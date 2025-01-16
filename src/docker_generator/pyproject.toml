@@ -1,0 +1,19 @@
+[project]
+name = "docker-generator"
+version = "1.0.0"
+description = "Generate a docker image that exposes an MCP server."
+authors = [
+    {name = "Tyler Kendrick",email = "145080887+Tyler-R-Kendrick@users.noreply.github.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docker (>=7.1.0,<8.0.0)",
+    "docker-py (>=1.10.6,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
