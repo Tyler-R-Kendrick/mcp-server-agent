@@ -4,6 +4,7 @@ import sys
 import docker.utils
 import git
 import docker
+import codeql_config
 
 ###
 # 1. Create a tool for semantic kernel that achieves the following:
@@ -39,34 +40,14 @@ def create_dockerfile(local_dir):
     # Expose necessary ports
     EXPOSE 8080
 
+    # Install CodeQL
+    RUN apt-get update && apt-get install -y wget
+    RUN wget -q -O codeql.tar.gz https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz
+    RUN tar -xzf codeql.tar.gz -C /opt
+    RUN ln -s /opt/codeql/codeql /usr/local/bin/codeql
+
+    # Register CodeQL in the PATH
+    ENV PATH="$PATH:/opt/codeql"
+
     # Run the agent.py script
     CMD ["python", "/workspace/src/app/agent.py", "{local_dir}"]
-    """
-    with open(os.path.join(local_dir, 'DOCKERFILE'), 'w') as f:
-        f.write(dockerfile_content)
-
-def create_docker_compose(local_dir):
-    docker_compose_content = f"""
-    version: '0.1'
-
-    services:
-      mcp-server:
-        build: {local_dir}
-        ports:
-          - "8080:8080"
-    """
-    with open(os.path.join(local_dir, 'docker-compose.yml'), 'w') as f:
-        f.write(docker_compose_content)
-
-def main(repo_path):
-    local_dir = '/tmp/repo'
-    clone_repo(repo_path, local_dir)
-    create_dockerfile(local_dir)
-    create_docker_compose(local_dir)
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python agent.py <repo_path>")
-        sys.exit(1)
-    repo_path = sys.argv[1]
-    main(repo_path)
