@@ -2,6 +2,7 @@ using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.IO.Pipelines;
+using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -30,46 +31,73 @@ namespace SecretAgent.Tests
         [Test]
         public async Task TestCorrectInput()
         {
+            var secretsObservable = _secretsAgent.CreateSecretsObservable(_cancellationTokenSource.Token);
+            var secretsList = new List<Secret>();
+
+            var subscription = secretsObservable.Subscribe(secret =>
+            {
+                secretsList.Add(secret);
+            });
+
             var writeTask = WriteToPipelineAsync(_pipeline.Writer, new List<string> { "key1:value1", "key2:value2" });
-            var readTask = _secretsAgent.ReadSecretsAsync(_pipeline.Reader, _secrets, _cancellationTokenSource.Token);
+            await writeTask;
 
-            await Task.WhenAll(writeTask, readTask);
+            _cancellationTokenSource.Cancel();
+            subscription.Dispose();
 
-            Assert.AreEqual(2, _secrets.Count);
-            Assert.AreEqual("key1", _secrets[0].Key);
-            Assert.AreEqual("value1", _secrets[0].Value);
-            Assert.AreEqual("key2", _secrets[1].Key);
-            Assert.AreEqual("value2", _secrets[1].Value);
+            Assert.AreEqual(2, secretsList.Count);
+            Assert.AreEqual("key1", secretsList[0].Key);
+            Assert.AreEqual("value1", secretsList[0].Value);
+            Assert.AreEqual("key2", secretsList[1].Key);
+            Assert.AreEqual("value2", secretsList[1].Value);
         }
 
         [Test]
         public async Task TestIncorrectInput()
         {
+            var secretsObservable = _secretsAgent.CreateSecretsObservable(_cancellationTokenSource.Token);
+            var secretsList = new List<Secret>();
+
+            var subscription = secretsObservable.Subscribe(secret =>
+            {
+                secretsList.Add(secret);
+            });
+
             var writeTask = WriteToPipelineAsync(_pipeline.Writer, new List<string> { "key1:value1", "invalid_input" });
-            var readTask = _secretsAgent.ReadSecretsAsync(_pipeline.Reader, _secrets, _cancellationTokenSource.Token);
+            await writeTask;
 
-            await Task.WhenAll(writeTask, readTask);
+            _cancellationTokenSource.Cancel();
+            subscription.Dispose();
 
-            Assert.AreEqual(1, _secrets.Count);
-            Assert.AreEqual("key1", _secrets[0].Key);
-            Assert.AreEqual("value1", _secrets[0].Value);
+            Assert.AreEqual(1, secretsList.Count);
+            Assert.AreEqual("key1", secretsList[0].Key);
+            Assert.AreEqual("value1", secretsList[0].Value);
         }
 
         [Test]
         public async Task TestOutputStream()
         {
+            var secretsObservable = _secretsAgent.CreateSecretsObservable(_cancellationTokenSource.Token);
+            var secretsList = new List<Secret>();
+
+            var subscription = secretsObservable.Subscribe(secret =>
+            {
+                secretsList.Add(secret);
+            });
+
             var writeTask = WriteToPipelineAsync(_pipeline.Writer, new List<string> { "key1:value1", "key2:value2", "key3:value3" });
-            var readTask = _secretsAgent.ReadSecretsAsync(_pipeline.Reader, _secrets, _cancellationTokenSource.Token);
+            await writeTask;
 
-            await Task.WhenAll(writeTask, readTask);
+            _cancellationTokenSource.Cancel();
+            subscription.Dispose();
 
-            Assert.AreEqual(3, _secrets.Count);
-            Assert.AreEqual("key1", _secrets[0].Key);
-            Assert.AreEqual("value1", _secrets[0].Value);
-            Assert.AreEqual("key2", _secrets[1].Key);
-            Assert.AreEqual("value2", _secrets[1].Value);
-            Assert.AreEqual("key3", _secrets[2].Key);
-            Assert.AreEqual("value3", _secrets[2].Value);
+            Assert.AreEqual(3, secretsList.Count);
+            Assert.AreEqual("key1", secretsList[0].Key);
+            Assert.AreEqual("value1", secretsList[0].Value);
+            Assert.AreEqual("key2", secretsList[1].Key);
+            Assert.AreEqual("value2", secretsList[1].Value);
+            Assert.AreEqual("key3", secretsList[2].Key);
+            Assert.AreEqual("value3", secretsList[2].Value);
         }
 
         private async Task WriteToPipelineAsync(PipeWriter writer, List<string> inputs)
