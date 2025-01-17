@@ -1,0 +1,9 @@
+<Project>
+  <Target Name="CommonBuild">
+    <Message Text="Building project..." Importance="high" />
+  </Target>
+
+  <Target Name="CommonTest">
+    <Message Text="Running tests..." Importance="high" />
+  </Target>
+</Project>

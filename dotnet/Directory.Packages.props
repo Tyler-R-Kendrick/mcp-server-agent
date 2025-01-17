@@ -1,0 +1,11 @@
+<Project>
+  <ItemGroup>
+    <PackageReference Update="System.CommandLine" Version="2.0.0-beta1" />
+    <PackageReference Update="System.IO.Pipelines" Version="6.0.0" />
+    <PackageReference Update="System.Reactive" Version="5.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Resilience" Version="8.5.1" />
+    <PackageReference Update="Microsoft.Extensions.Hosting" Version="7.0.0" />
+    <PackageReference Update="NUnit" Version="3.13.3" />
+    <PackageReference Update="MSTest.TestFramework" Version="3.7.0" />
+  </ItemGroup>
+</Project>
