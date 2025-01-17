@@ -29,16 +29,28 @@ namespace SecretAgent
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var secrets = new List<Secret>();
-            var pipeline = new Pipe();
+            var secretsObservable = CreateSecretsObservable(stoppingToken);
+            secretsObservable.Subscribe(secret =>
+            {
+                _logger.LogInformation($"Secret: {secret.Key} - {secret.Value}");
+            });
 
-            var readTask = ReadSecretsAsync(pipeline.Reader, secrets, stoppingToken);
-            var writeTask = WriteSecretsAsync(pipeline.Writer, stoppingToken);
-
-            await Task.WhenAll(readTask, writeTask);
+            await Task.CompletedTask;
         }
 
-        private async Task ReadSecretsAsync(PipeReader reader, List<Secret> secrets, CancellationToken stoppingToken)
+        private IObservable<Secret> CreateSecretsObservable(CancellationToken stoppingToken)
+        {
+            return Observable.Create<Secret>(async observer =>
+            {
+                var pipeline = new Pipe();
+                var readTask = ReadSecretsAsync(pipeline.Reader, observer, stoppingToken);
+                var writeTask = WriteSecretsAsync(pipeline.Writer, stoppingToken);
+
+                await Task.WhenAll(readTask, writeTask);
+            });
+        }
+
+        private async Task ReadSecretsAsync(PipeReader reader, IObserver<Secret> observer, CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -47,12 +59,7 @@ namespace SecretAgent
 
                 while (TryReadSecret(ref buffer, out var secret))
                 {
-                    secrets.Add(secret);
-                    if (secrets.Count % _itemsPerPage == 0)
-                    {
-                        DisplaySecrets(secrets);
-                        secrets.Clear();
-                    }
+                    observer.OnNext(secret);
                 }
 
                 reader.AdvanceTo(buffer.Start, buffer.End);
@@ -63,10 +70,7 @@ namespace SecretAgent
                 }
             }
 
-            if (secrets.Count > 0)
-            {
-                DisplaySecrets(secrets);
-            }
+            observer.OnCompleted();
         }
 
         private async Task WriteSecretsAsync(PipeWriter writer, CancellationToken stoppingToken)
@@ -88,14 +92,6 @@ namespace SecretAgent
             // Implement logic to read secret from buffer
             secret = new Secret("key", "value");
             return true;
-        }
-
-        private void DisplaySecrets(List<Secret> secrets)
-        {
-            foreach (var secret in secrets)
-            {
-                _logger.LogInformation($"Secret: {secret.Key} - {secret.Value}");
-            }
         }
     }
 }
