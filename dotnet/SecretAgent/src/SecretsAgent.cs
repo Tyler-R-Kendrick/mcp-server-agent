@@ -1,97 +1,96 @@
-using System;
-using System.Collections.Generic;
-using System.CommandLine;
-using System.CommandLine.Invocation;
+using System.Buffers;
 using System.IO.Pipelines;
 using System.Reactive.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Polly;
+using System.Text;
+using FluentValidation;
+using FluentValidation.Results;
 
-namespace SecretAgent
+namespace SecretAgent;
+
+public class SecretsAgent<TSecret>(
+    Func<Stream> stdinFactory,
+    Func<Stream> stdoutFactory,
+    TSecret initialData,
+    IValidator<TSecret> validator,
+    ILogger<SecretsAgent<TSecret>> logger)
 {
-    public record Secret(string Key, string Value);
-
-    public class SecretsAgent : BackgroundService
+    private async Task WriteError(
+        string errorMessage,
+        CancellationToken stoppingToken)
     {
-        private readonly ILogger<SecretsAgent> _logger;
-        private readonly int _itemsPerPage;
-        private readonly IAsyncPolicy _resiliencyPolicy;
+        var errorBytes = Encoding.UTF8.GetBytes(errorMessage);
+        var pipeWriter = PipeWriter.Create(stdoutFactory());
+        await pipeWriter.WriteAsync(new(errorBytes), stoppingToken);
+        await pipeWriter.CompleteAsync();
+    }
 
-        public SecretsAgent(ILogger<SecretsAgent> logger, int itemsPerPage, IAsyncPolicy resiliencyPolicy)
+    private async Task<string> ReadError(
+        CancellationToken stoppingToken)
+    {        
+        var pipeReader = PipeReader.Create(stdinFactory());
+        var readResult = await pipeReader.ReadAsync(stoppingToken);
+        var buffer = readResult.Buffer.ToArray();
+        return Encoding.UTF8.GetString(buffer);
+    }
+
+    private static TSecret SetProperty(
+        string propertyName,
+        string secretValue,
+        TSecret secrets,
+        ILogger logger)
+    {
+        var localSecrets = secrets;
+        var property = typeof(TSecret).GetProperty(propertyName);
+        property?.SetValue(localSecrets, secretValue);
+        logger.LogInformation("Property {0} set to {1}", propertyName, secretValue);
+        return localSecrets;
+    }
+
+    private async Task<TSecret> HandleError(
+        string propertyName,
+        IDictionary<string, string[]> errorDictionary,
+        TSecret secrets,
+        CancellationToken stoppingToken)
+    {
+        var errors = errorDictionary[propertyName].Distinct();
+        var message = string.Join(",", errors);
+        var errorMessage = $"{propertyName}: {message}";
+        await WriteError(errorMessage, stoppingToken);
+        var secretValue = await ReadError(stoppingToken);
+        return SetProperty(propertyName, secretValue, secrets, logger);
+    }
+
+    private async Task<TSecret> HandleValidationResult(
+        ValidationResult validationResult,
+        TSecret secrets,
+        CancellationToken stoppingToken)
+    {
+        var errorDictionary = validationResult.ToDictionary();
+        foreach (var propertyName in errorDictionary.Keys)
         {
-            _logger = logger;
-            _itemsPerPage = itemsPerPage;
-            _resiliencyPolicy = resiliencyPolicy;
+            secrets = await HandleError(
+                propertyName,
+                errorDictionary,
+                secrets,
+                stoppingToken);
         }
+        return secrets;
+    }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public async Task WriteSecrets(
+        CancellationToken stoppingToken)
+    {
+        var secrets = initialData;
+        var validationResult = validator.Validate(secrets);
+        while (!stoppingToken.IsCancellationRequested && !validationResult.IsValid)
         {
-            var secretsObservable = CreateSecretsObservable(stoppingToken);
-            secretsObservable.Subscribe(secret =>
-            {
-                _logger.LogInformation($"Secret: {secret.Key} - {secret.Value}");
-            });
-
-            await Task.CompletedTask;
+            secrets = await HandleValidationResult(
+                validationResult,
+                secrets,
+                stoppingToken);
+            validationResult = validator.Validate(secrets);
+            logger.LogInformation("Validating secrets {0}", validationResult.IsValid);
         }
-
-        private IObservable<Secret> CreateSecretsObservable(CancellationToken stoppingToken)
-        {
-            return Observable.Create<Secret>(async observer =>
-            {
-                var pipeline = new Pipe();
-                var readTask = ReadSecretsAsync(pipeline.Reader, observer, stoppingToken);
-                var writeTask = WriteSecretsAsync(pipeline.Writer, stoppingToken);
-
-                await Task.WhenAll(readTask, writeTask);
-            });
-        }
-
-        private async Task ReadSecretsAsync(PipeReader reader, IObserver<Secret> observer, CancellationToken stoppingToken)
-        {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                var result = await reader.ReadAsync(stoppingToken);
-                var buffer = result.Buffer;
-
-                while (TryReadSecret(ref buffer, out var secret))
-                {
-                    observer.OnNext(secret);
-                }
-
-                reader.AdvanceTo(buffer.Start, buffer.End);
-
-                if (result.IsCompleted)
-                {
-                    break;
-                }
-            }
-
-            observer.OnCompleted();
-        }
-
-        private async Task WriteSecretsAsync(PipeWriter writer, CancellationToken stoppingToken)
-        {
-            var input = new CommandLineBuilder()
-                .AddCommand(new Command("add", "Add a secret")
-                {
-                    new Argument<string>("key", "The key of the secret"),
-                    new Argument<string>("value", "The value of the secret")
-                })
-                .UseDefaults()
-                .Build();
-
-            await input.InvokeAsync(new string[] { }, stoppingToken);
-        }
-
-        private bool TryReadSecret(ref ReadOnlySequence<byte> buffer, out Secret secret)
-        {
-            // Implement logic to read secret from buffer
-            secret = new Secret("key", "value");
-            return true;
-        }
+        logger.LogInformation("Secrets retrieved and validated successfully.");
     }
 }

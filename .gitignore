@@ -1,3 +1,6 @@
 *.lock
 __pycache__
 .venv
+
+bin/
+obj/
