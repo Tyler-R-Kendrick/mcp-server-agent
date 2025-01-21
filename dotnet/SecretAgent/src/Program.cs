@@ -1,22 +1,21 @@
 using FluentValidation;
-using SecretAgent;
 
 var builder = Host.CreateDefaultBuilder(args)
+    .ConfigureHostConfiguration(configHost =>
+    {
+        configHost
+            .AddEnvironmentVariables()
+            .AddUserSecrets<Program>(true, true)
+            .AddCommandLine(args);
+    })
     .ConfigureServices((hostContext, services) =>
     {
-        services.AddHostedService<SecretsAgentService<Secrets>>();
-        services.AddSingleton<SecretsAgent<Secrets>>(provider => new(
-            stdinFactory: () => Console.OpenStandardInput(),
-            stdoutFactory: () => Console.OpenStandardOutput(),
-            initialData: new(null, null, null),
-            validator: provider.GetRequiredService<IValidator<Secrets>>(),
-            logger: provider.GetRequiredService<ILogger<SecretsAgent<Secrets>>>()));
-        services.AddTransient<IValidator<Secrets>, SecretsValidator>();
+        services.AddSecretAgent(_ => new SecretsValidator());
     })
     .ConfigureLogging(logging =>
     {
         logging.ClearProviders();
-        //logging.AddConsole();
+        logging.AddConsole();
     });
 
 var host = builder.Build();

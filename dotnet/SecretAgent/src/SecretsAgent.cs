@@ -1,96 +1,54 @@
-using System.Buffers;
-using System.IO.Pipelines;
 using System.Reactive.Linq;
-using System.Text;
-using FluentValidation;
-using FluentValidation.Results;
+using Microsoft.Extensions.AI;
 
 namespace SecretAgent;
 
 public class SecretsAgent<TSecret>(
-    Func<Stream> stdinFactory,
-    Func<Stream> stdoutFactory,
-    TSecret initialData,
-    IValidator<TSecret> validator,
-    ILogger<SecretsAgent<TSecret>> logger)
+    IChatClient chatClient,
+    ChatMessage[] history,
+    SecretsConversation<TSecret> conversation)
 {
-    private async Task WriteError(
-        string errorMessage,
+    private IObservable<TSecret> WriteSecretsObservable(
         CancellationToken stoppingToken)
-    {
-        var errorBytes = Encoding.UTF8.GetBytes(errorMessage);
-        var pipeWriter = PipeWriter.Create(stdoutFactory());
-        await pipeWriter.WriteAsync(new(errorBytes), stoppingToken);
-        await pipeWriter.CompleteAsync();
-    }
-
-    private async Task<string> ReadError(
-        CancellationToken stoppingToken)
-    {        
-        var pipeReader = PipeReader.Create(stdinFactory());
-        var readResult = await pipeReader.ReadAsync(stoppingToken);
-        var buffer = readResult.Buffer.ToArray();
-        return Encoding.UTF8.GetString(buffer);
-    }
-
-    private static TSecret SetProperty(
-        string propertyName,
-        string secretValue,
-        TSecret secrets,
-        ILogger logger)
-    {
-        var localSecrets = secrets;
-        var property = typeof(TSecret).GetProperty(propertyName);
-        property?.SetValue(localSecrets, secretValue);
-        logger.LogInformation("Property {0} set to {1}", propertyName, secretValue);
-        return localSecrets;
-    }
-
-    private async Task<TSecret> HandleError(
-        string propertyName,
-        IDictionary<string, string[]> errorDictionary,
-        TSecret secrets,
-        CancellationToken stoppingToken)
-    {
-        var errors = errorDictionary[propertyName].Distinct();
-        var message = string.Join(",", errors);
-        var errorMessage = $"{propertyName}: {message}";
-        await WriteError(errorMessage, stoppingToken);
-        var secretValue = await ReadError(stoppingToken);
-        return SetProperty(propertyName, secretValue, secrets, logger);
-    }
-
-    private async Task<TSecret> HandleValidationResult(
-        ValidationResult validationResult,
-        TSecret secrets,
-        CancellationToken stoppingToken)
-    {
-        var errorDictionary = validationResult.ToDictionary();
-        foreach (var propertyName in errorDictionary.Keys)
+        => Observable.Create<TSecret>(async (observer, cancellationToken) =>
         {
-            secrets = await HandleError(
-                propertyName,
-                errorDictionary,
-                secrets,
-                stoppingToken);
-        }
-        return secrets;
-    }
+            await foreach (var secret in conversation
+                .WriteSecrets(cancellationToken)
+                .WithCancellation(stoppingToken))
+            {
+                observer.OnNext(secret);
+            }
+            observer.OnCompleted();
+        });
 
-    public async Task WriteSecrets(
+    public async Task<TSecret> WriteSecrets(
         CancellationToken stoppingToken)
     {
-        var secrets = initialData;
-        var validationResult = validator.Validate(secrets);
-        while (!stoppingToken.IsCancellationRequested && !validationResult.IsValid)
+        var secrets = WriteSecretsObservable(stoppingToken);
+        using var observer = secrets.Subscribe(
+            //TODO: find a way to write secrets to an injected config
+            //onNext: async secret => await config.WriteAsync(secret, stoppingToken)
+        );
+        return await secrets.LastAsync();
+    }
+
+    public async Task<string> ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        var chat = chatClient.AsBuilder()
+            .UseFunctionInvocation()
+            .Build();
+        ChatMessage systemMessage = new(ChatRole.System, @"
+            You are an AI agent that is resoponsible for collecting secrets.
+            If there are errors in the most recent tooling responses,
+            you will run a process to collect those secrets. 
+        ");
+        ChatMessage[] localHistory = [ systemMessage, ..history ];
+        var result = await chat.CompleteAsync(history, new()
         {
-            secrets = await HandleValidationResult(
-                validationResult,
-                secrets,
-                stoppingToken);
-            validationResult = validator.Validate(secrets);
-            logger.LogInformation("Validating secrets {0}", validationResult.IsValid);
-        }
-        logger.LogInformation("Secrets retrieved and validated successfully.");
+            ToolMode = ChatToolMode.Auto,
+            Tools = [ AIFunctionFactory.Create(WriteSecrets) ]
+        }, stoppingToken);
+        return result.ToString();
     }
 }
